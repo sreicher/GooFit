@@ -2,6 +2,8 @@
 #define FITMANAGER_MINUIT1_HH
 
 #include "TMinuit.hh" 
+#include <sys/time.h>
+#include <sys/times.h>
 extern PdfBase* pdfPointer; 
 extern int numPars; 
 #ifdef OMP_ON

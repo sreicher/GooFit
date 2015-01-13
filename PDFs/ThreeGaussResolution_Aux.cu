@@ -7,30 +7,30 @@ const fptype R1o6      = 1.0 / 6.0;
 EXEC_TARGET void gaussian (fptype& _P1, fptype& _P2, fptype& _P3, fptype& _P4,
 			  fptype _tau, fptype adjTime, fptype xmixing, fptype ymixing, fptype adjSigma) {
 
-  fptype _1oSqrtA  = adjSigma*M_SQRT2; 
-  fptype _1oSigma  = 1 / adjSigma; 
-  fptype _1o2SqrtA = 0.5 *_1oSqrtA; 
-  fptype _1oSigma2 = _1oSigma * _1oSigma; 
-  fptype _NormG    = SQRT1o2PI *_1oSigma;
+  fptype _1oSqrtA  = adjSigma*M_SQRT2; // = sigma*sqrt(2) 
+  fptype _1oSigma  = 1 / adjSigma; // = 1/sigma
+  fptype _1o2SqrtA = 0.5 *_1oSqrtA; // = 0.5*sigma*sqrt(2)
+  fptype _1oSigma2 = _1oSigma * _1oSigma; // 1/sigma^2 
+  fptype _NormG    = SQRT1o2PI *_1oSigma; // = 1/sqrt(2*pi*sigma^2) 
   
-  fptype _C        = 0.5*adjTime*adjTime*_1oSigma2; 
-  fptype _Bgn      = - adjTime*_1oSigma2; 
+  fptype _C        = 0.5*adjTime*adjTime*_1oSigma2; // = 0.5*t^2/sigma^2 
+  fptype _Bgn      = - adjTime*_1oSigma2; // = - t/sigma^2 
 
-  fptype _Gamma    = 1 / _tau; 
-  fptype _B        = _Gamma + _Bgn; 
+  fptype _Gamma    = 1 / _tau; // = 1/tau
+  fptype _B        = _Gamma + _Bgn; // = 1/tau -t/sigma^2
   
-  fptype _u0       = _1o2SqrtA *_B; 
-  fptype _u02      = _u0 *_u0; 
-  fptype _F        = _1oSqrtA * exp( -_C + _u02 ); 
+  fptype _u0       = _1o2SqrtA *_B; // = 0.5*sigma*sqrt(2)*(1/tau -t/sigma^2) 
+  fptype _u02      = _u0 *_u0;  
+  fptype _F        = _1oSqrtA * exp( -_C + _u02 ); // = sigma*sqrt(2) * exp(- 0.5*t^2/sigma^2 + (0.5*sigma*sqrt(2)*(1/tau -t/sigma^2))^2)
   
-  fptype _Ig0      = SQRTPIo2 * ERFC(_u0); 
-  fptype _Ig1      =  0.5 * exp(-_u02); 
+  fptype _Ig0      = SQRTPIo2 * ERFC(_u0); // = 0.5*sqrt(pi)*erfc((0.5*sigma*sqrt(2)*(1/tau -t/sigma^2))^2)  
+  fptype _Ig1      =  0.5 * exp(-_u02); // = 0.5*exp(-(0.5*sigma*sqrt(2)*(1/tau -t/sigma^2))^2) 
   fptype _Ig2      = _Ig1 *_u0 + 0.5 *_Ig0; 
   fptype _Ig3      = _Ig1 * (_u02 + 1);
   
-  fptype _R    = xmixing *_Gamma * _1oSqrtA; 
-  fptype _R2   = _R *_R; 
-  fptype _It0  = _F      *       _Ig0; 
+  fptype _R    = xmixing *_Gamma * _1oSqrtA; // = x*sigma/(sqrt(2)*tau) 
+  fptype _R2   = _R *_R; // = x^2*sigma^2/(2*tau^2) 
+  fptype _It0  = _F      *       _Ig0;  
   fptype _It1  = _F *_R  *      (_Ig1 - _u0 *_Ig0); 
   fptype _It2  = _F *_R2 *      (_Ig2 - _u0 *_Ig1 * 2  + _u02 *_Ig0); 
   fptype _It3  = _F *_R2 * _R * (_Ig3 - _u0 *_Ig2 * 3  + _u02 *_Ig1 * 3 - _u0 *_u02 *_Ig0); 
@@ -55,8 +55,8 @@ EXEC_TARGET fptype device_threegauss_resolution (fptype coshterm, fptype costerm
 
 
   fptype coreFraction    = p[indices[1]];
-  //fptype tailFraction    = p[indices[2]];
-  fptype tailFraction    = (1 - coreFraction)*p[indices[2]];
+  fptype tailFraction    = p[indices[2]];
+  //fptype tailFraction    = (1 - coreFraction)*p[indices[2]];
   fptype outlFraction    = 1 - coreFraction - tailFraction; 
   fptype coreBias        = p[indices[3]];
   fptype coreScaleFactor = p[indices[4]];
@@ -64,7 +64,7 @@ EXEC_TARGET fptype device_threegauss_resolution (fptype coshterm, fptype costerm
   fptype tailScaleFactor = p[indices[6]];
   fptype outlBias        = p[indices[7]];
   fptype outlScaleFactor = p[indices[8]];
-
+  // cp1, cp2, cp3, cp4 are calculated in gaussian
   fptype cp1 = 0;
   fptype cp2 = 0;
   fptype cp3 = 0;

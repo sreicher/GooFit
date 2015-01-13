@@ -42,7 +42,7 @@ EXEC_TARGET devcomplex<fptype> getResonanceAmplitude (fptype m12, fptype m13, fp
   return (*func)(m12, m13, m23, paramIndices + pIndex); 
 }
 
-EXEC_TARGET ThreeComplex device_Tddp_calcIntegrals (fptype m12, fptype m13, int res_i, int res_j, fptype* p, unsigned int* indices) {
+EXEC_TARGET ThreeComplex device_Tddp_calcIntegrals (fptype m12, fptype m13, fptype decaytime, int res_i, int res_j, fptype* p, unsigned int* indices) {
   // For calculating Dalitz-plot integrals. What's needed is the products 
   // AiAj*, AiBj*, and BiBj*, where 
   // Ai = BW_i(x, y) + BW_i(y, x)
@@ -60,6 +60,24 @@ EXEC_TARGET ThreeComplex device_Tddp_calcIntegrals (fptype m12, fptype m13, int 
   fptype daug2Mass  = functorConstants[indices[1] + 2]; 
   fptype daug3Mass  = functorConstants[indices[1] + 3];  
 
+#ifdef THREEDINT
+  // Add time dependence before integrating over time
+  fptype tau     = p[indices[2]];
+  fptype xmixing = p[indices[3]];
+  fptype ymixing = p[indices[4]];
+  fptype gammahalf = decaytime/(2*tau);
+  // A ~ e1 + e2 and B ~ e1 - e2
+  devcomplex<fptype> e1( EXP(-gammahalf*(1+ymixing))*COS(gammahalf*xmixing) , -EXP(-gammahalf*(1+ymixing))*SIN(gammahalf*xmixing) );
+  devcomplex<fptype> e2( EXP(-gammahalf*(1-ymixing))*COS(gammahalf*xmixing) , +EXP(-gammahalf*(1-ymixing))*SIN(gammahalf*xmixing) );
+  devcomplex<fptype> sqrt2(1/SQRT(2.), 0);
+  // Time-dependent amplitudes
+  devcomplex<fptype> eA = sqrt2*(e1 + e2);
+  devcomplex<fptype> eB = sqrt2*(e1 - e2);
+#else
+  devcomplex<fptype> eA(1,0);
+  devcomplex<fptype> eB(1,0);
+#endif
+
   ThreeComplex ret; 
   if (!inDalitz(m12, m13, motherMass, daug1Mass, daug2Mass, daug3Mass)) return ret;
   fptype m23 = motherMass*motherMass + daug1Mass*daug1Mass + daug2Mass*daug2Mass + daug3Mass*daug3Mass - m12 - m13; 
@@ -67,18 +85,17 @@ EXEC_TARGET ThreeComplex device_Tddp_calcIntegrals (fptype m12, fptype m13, int 
   int parameter_i = parIndexFromResIndex(res_i);
   int parameter_j = parIndexFromResIndex(res_j);
 
-  //fptype amp_real             = p[indices[parameter_i+0]];
-  //fptype amp_imag             = p[indices[parameter_i+1]];
   unsigned int functn_i = indices[parameter_i+2];
   unsigned int params_i = indices[parameter_i+3];
-  devcomplex<fptype> ai = getResonanceAmplitude(m12, m13, m23, functn_i, params_i);
-  devcomplex<fptype> bi = getResonanceAmplitude(m13, m12, m23, functn_i, params_i);
+  devcomplex<fptype> ai = eA*getResonanceAmplitude(m12, m13, m23, functn_i, params_i);
+  devcomplex<fptype> bi = eB*getResonanceAmplitude(m13, m12, m23, functn_i, params_i);
 
   unsigned int functn_j = indices[parameter_j+2];
   unsigned int params_j = indices[parameter_j+3];
-  devcomplex<fptype> aj = conj(getResonanceAmplitude(m12, m13, m23, functn_j, params_j));
-  devcomplex<fptype> bj = conj(getResonanceAmplitude(m13, m12, m23, functn_j, params_j)); 
+  devcomplex<fptype> aj = conj(eA*getResonanceAmplitude(m12, m13, m23, functn_j, params_j));
+  devcomplex<fptype> bj = conj(eB*getResonanceAmplitude(m13, m12, m23, functn_j, params_j)); 
 
+  // Remember that ThreeComplex = typedef thrust::tuple<fptype, fptype, fptype, fptype, fptype, fptype> ThreeComplex
   ret = ThreeComplex((ai*aj).real, (ai*aj).imag, (ai*bj).real, (ai*bj).imag, (bi*bj).real, (bi*bj).imag);
   return ret; 
 }
@@ -276,6 +293,8 @@ __host__ TddpPdf::TddpPdf (std::string n, Variable* _dtime, Variable* _sigmat, V
   , decayInfo(decay)
   , _m12(m12)
   , _m13(m13)
+  , cachedVar(0)
+  , _savedtime(_dtime)
   , dalitzNormRange(0)
   , cachedWaves(0) 
   , integrals(0)
@@ -367,6 +386,8 @@ __host__ TddpPdf::TddpPdf (std::string n, Variable* _dtime, Variable* _sigmat, V
   , decayInfo(decay)
   , _m12(m12)
   , _m13(m13)
+  , cachedVar(0)
+  , _savedtime(_dtime)
   , dalitzNormRange(0)
   , cachedWaves(0) 
   , integrals(0)
@@ -485,6 +506,48 @@ __host__ fptype TddpPdf::normalise () const {
   MEMCPY_TO_SYMBOL(normalisationFactors, host_normalisation, totalParams*sizeof(fptype), 0, cudaMemcpyHostToDevice); 
   //std::cout << "TDDP normalisation " << getName() << std::endl;
 
+#ifdef THREEDINT
+  int totalBins = _m12->numbins * _m13->numbins * _savedtime->numbins;
+  if (!dalitzNormRange) {
+    gooMalloc((void**) &dalitzNormRange, 9*sizeof(fptype));
+  
+    fptype* host_norms = new fptype[9];
+    host_norms[0] = _m12->lowerlimit;
+    host_norms[1] = _m12->upperlimit;
+    host_norms[2] = _m12->numbins;
+    host_norms[3] = _m13->lowerlimit;
+    host_norms[4] = _m13->upperlimit;
+    host_norms[5] = _m13->numbins;
+    host_norms[6] = _savedtime->lowerlimit;
+    host_norms[7] = _savedtime->upperlimit;
+    host_norms[8] = _savedtime->numbins;
+    MEMCPY(dalitzNormRange, host_norms, 9*sizeof(fptype), cudaMemcpyHostToDevice);
+    delete[] host_norms; 
+  }
+
+  for (unsigned int i = 0; i < decayInfo->resonances.size(); ++i) {
+    redoIntegral[i] = forceRedoIntegrals; // Initial value true 
+    
+    if ((decayInfo->resonances[i]->parametersChanged()) == true){
+      redoIntegral[i] = true;
+      continue;
+    }
+    else if ((valueChanged(2)) == true || (valueChanged(3)) == true || (valueChanged(4)) == true){
+      redoIntegral[i] = true;
+      continue;
+    }
+    else {
+      redoIntegral[i] = false; 
+    }
+
+    decayInfo->resonances[i]->storeParameters();
+    storeValue(2);
+    storeValue(3);
+    storeValue(4);
+  }
+  forceRedoIntegrals = true; 
+
+#else
   int totalBins = _m12->numbins * _m13->numbins;
   if (!dalitzNormRange) {
     gooMalloc((void**) &dalitzNormRange, 6*sizeof(fptype));
@@ -507,8 +570,9 @@ __host__ fptype TddpPdf::normalise () const {
     decayInfo->resonances[i]->storeParameters();
   }
   forceRedoIntegrals = false; 
+#endif
 
-  // Only do this bit if masses or widths have changed.  
+  // Only do this bit if masses or widths or tau or x or y have changed.  
   thrust::constant_iterator<fptype*> arrayAddress(dalitzNormRange); 
   thrust::counting_iterator<int> binIndex(0); 
 
@@ -524,7 +588,10 @@ __host__ fptype TddpPdf::normalise () const {
 
   for (int i = 0; i < decayInfo->resonances.size(); ++i) {
     if (redoIntegral[i]) {
-      
+    // begin, end, start of 2nd data or of data storage, transformation. 
+    // Uses SpecialWaveCalculator::operator () and result is written in 3rd argument which is of type WaveHolder
+    // strided_range<...>(cachedWaves->begin() + i, cachedWaves->end(), decayInfo->resonances.size()) gives vector containing cachedWaves->begin() + i, cachedWaves->begin() + i + decayInfo->resonances.size(), etc back -> updates cachedWaves
+
       thrust::transform(thrust::make_zip_iterator(thrust::make_tuple(eventIndex, dataArray, eventSize)),
 			thrust::make_zip_iterator(thrust::make_tuple(eventIndex + numEntries, arrayAddress, eventSize)),
 			strided_range<thrust::device_vector<WaveHolder>::iterator>(cachedWaves->begin() + i, cachedWaves->end(), decayInfo->resonances.size()).begin(), 
@@ -537,6 +604,8 @@ __host__ fptype TddpPdf::normalise () const {
       if ((!redoIntegral[i]) && (!redoIntegral[j])) continue; 
       ThreeComplex dummy(0, 0, 0, 0, 0, 0);
       SpecialComplexSum complexSum; 
+      // begin, end, operation, start value, reduce operation. Here: Apply integrators[i][j] on each element, and add result of complexSum to dummy
+      // arrayAddress is dalitzNormRange
       (*(integrals[i][j])) = thrust::transform_reduce(thrust::make_zip_iterator(thrust::make_tuple(binIndex, arrayAddress)),
 						      thrust::make_zip_iterator(thrust::make_tuple(binIndex + totalBins, arrayAddress)),
 						      *(integrators[i][j]), 
@@ -559,6 +628,11 @@ __host__ fptype TddpPdf::normalise () const {
   complex<fptype> integralA_2(0, 0);
   complex<fptype> integralB_2(0, 0);
   complex<fptype> integralABs(0, 0);
+
+  // Complex coefficients are amplitude_i, amplitude_j -> a_r*e^(i phi_r) which are fitted and do NOT depend on m12 or m13
+  // The remaining terms are the m12 and m13 integrals over the spin factors etc
+  // thrust::get<0>(*(integrals[i][j])) -> get element 0 from tuple integrals[i][j]
+
   for (unsigned int i = 0; i < decayInfo->resonances.size(); ++i) {
     int param_i = parameters + resonanceOffset + resonanceSize*i; 
     complex<fptype> amplitude_i(host_params[host_indices[param_i]], host_params[host_indices[param_i + 1]]);
@@ -606,8 +680,13 @@ __host__ fptype TddpPdf::normalise () const {
   fptype xmixing = host_params[host_indices[parameters + 3]];
   fptype ymixing = host_params[host_indices[parameters + 4]];
 
-  fptype ret = resolution->normalisation(dalitzIntegralOne, dalitzIntegralTwo, dalitzIntegralThr, dalitzIntegralFou, tau, xmixing, ymixing); 
 
+#ifdef THREEDINT
+  fptype ret = dalitzIntegralOne + dalitzIntegralTwo + dalitzIntegralThr + dalitzIntegralFou;
+#else
+  fptype ret = resolution->normalisation(dalitzIntegralOne, dalitzIntegralTwo, dalitzIntegralThr, dalitzIntegralFou, tau, xmixing, ymixing); 
+#endif
+  // For 3D integral, the time factor is already included in ret
   double binSizeFactor = 1;
   binSizeFactor *= ((_m12->upperlimit - _m12->lowerlimit) / _m12->numbins);
   binSizeFactor *= ((_m13->upperlimit - _m13->lowerlimit) / _m13->numbins);
@@ -641,6 +720,7 @@ EXEC_TARGET ThreeComplex SpecialDalitzIntegrator::operator () (thrust::tuple<int
   // Bin index, base address [lower, upper, numbins] 
   // Notice that this is basically MetricTaker::operator (binned) with the special-case knowledge
   // that event size is two, and that the function to call is dev_Tddp_calcIntegrals.
+  // t = tuple<int, fptype*> where int = binIndex and fptype is dalitzNormRange and contains m12, m13 (and t) information
 
   int globalBinNumber  = thrust::get<0>(t);
   fptype lowerBoundM12 = thrust::get<1>(t)[0];
@@ -652,6 +732,31 @@ EXEC_TARGET ThreeComplex SpecialDalitzIntegrator::operator () (thrust::tuple<int
   binCenterM12        *= (binNumberM12 + 0.5); 
   binCenterM12        += lowerBoundM12; 
 
+#ifdef THREEDINT
+  globalBinNumber     /= numBinsM12; 
+  fptype lowerBoundM13 = thrust::get<1>(t)[3];
+  fptype upperBoundM13 = thrust::get<1>(t)[4];  
+  int numBinsM13       = (int) FLOOR(thrust::get<1>(t)[5] + 0.5); 
+  int binNumberM13    = globalBinNumber % numBinsM13;
+  fptype binCenterM13  = upperBoundM13 - lowerBoundM13;
+  binCenterM13        /= numBinsM13;
+  binCenterM13        *= (binNumberM13 + 0.5); 
+  binCenterM13        += lowerBoundM13; 
+  
+  globalBinNumber     /= numBinsM13;
+  fptype lowerBoundDtime = thrust::get<1>(t)[6];
+  fptype upperBoundDtime = thrust::get<1>(t)[7];
+  int numBinsDtime       = (int) FLOOR(thrust::get<1>(t)[8] + 0.5);
+  
+  // Midpoint approach
+  fptype binCenterDtime  = upperBoundDtime - lowerBoundDtime;
+  binCenterDtime        /= numBinsDtime;
+  binCenterDtime        *= (globalBinNumber + 0.5);
+  binCenterDtime        += lowerBoundDtime;
+  fptype size_fac        = (upperBoundDtime - lowerBoundDtime)/numBinsDtime;
+
+#else
+
   globalBinNumber     /= numBinsM12; 
   fptype lowerBoundM13 = thrust::get<1>(t)[3];
   fptype upperBoundM13 = thrust::get<1>(t)[4];  
@@ -660,14 +765,24 @@ EXEC_TARGET ThreeComplex SpecialDalitzIntegrator::operator () (thrust::tuple<int
   binCenterM13        /= numBinsM13;
   binCenterM13        *= (globalBinNumber + 0.5); 
   binCenterM13        += lowerBoundM13; 
+  fptype binCenterDtime = 0.;
+  fptype size_fac = 1.0;
+
+#endif
 
   //if (0 == THREADIDX) cuPrintf("%i %i %i %f %f operator\n", thrust::get<0>(t), thrust::get<0>(t) % numBinsM12, globalBinNumber, binCenterM12, binCenterM13);
   unsigned int* indices = paramIndices + parameters;   
-  ThreeComplex ret = device_Tddp_calcIntegrals(binCenterM12, binCenterM13, resonance_i, resonance_j, cudaArray, indices); 
+  ThreeComplex ret = device_Tddp_calcIntegrals(binCenterM12, binCenterM13, binCenterDtime, resonance_i, resonance_j, cudaArray, indices);
 
-  fptype fakeEvt[10]; // Need room for many observables in case m12 or m13 were assigned a high index in an event-weighted fit. 
+
+
+
+  fptype fakeEvt[15]; // Need room for many observables in case m12 or m13 were assigned a high index in an event-weighted fit. 
   fakeEvt[indices[indices[0] + 2 + 2]] = binCenterM12;
   fakeEvt[indices[indices[0] + 2 + 3]] = binCenterM13;
+#ifdef THREEDINT
+  fakeEvt[indices[indices[0] + 2 + 4]] = binCenterDtime;
+#endif
   unsigned int numResonances = indices[6]; 
   int effFunctionIdx = parIndexFromResIndex(numResonances); 
   //if (thrust::get<0>(t) == 19840) {internalDebug1 = BLOCKIDX; internalDebug2 = THREADIDX;}
@@ -684,12 +799,12 @@ EXEC_TARGET ThreeComplex SpecialDalitzIntegrator::operator () (thrust::tuple<int
   // These complex numbers will not be squared when they
   // go into the integrals. They've been squared already,
   // as it were. 
-  thrust::get<0>(ret) *= eff;
-  thrust::get<1>(ret) *= eff;
-  thrust::get<2>(ret) *= eff;
-  thrust::get<3>(ret) *= eff;
-  thrust::get<4>(ret) *= eff;
-  thrust::get<5>(ret) *= eff;
+  thrust::get<0>(ret) *= eff*size_fac;
+  thrust::get<1>(ret) *= eff*size_fac;
+  thrust::get<2>(ret) *= eff*size_fac;
+  thrust::get<3>(ret) *= eff*size_fac;
+  thrust::get<4>(ret) *= eff*size_fac;
+  thrust::get<5>(ret) *= eff*size_fac;
   return ret; 
 }
 
@@ -709,6 +824,7 @@ EXEC_TARGET WaveHolder SpecialWaveCalculator::operator () (thrust::tuple<int, fp
   fptype* evt = thrust::get<1>(t) + (evtNum * thrust::get<2>(t)); 
 
   unsigned int* indices = paramIndices + parameters;   // Jump to TDDP position within parameters array
+  fptype decaytime = evt[indices[2 + indices[0]]];
   fptype m12 = evt[indices[4 + indices[0]]]; 
   fptype m13 = evt[indices[5 + indices[0]]];
 
@@ -717,6 +833,25 @@ EXEC_TARGET WaveHolder SpecialWaveCalculator::operator () (thrust::tuple<int, fp
   fptype daug2Mass  = functorConstants[indices[1] + 2]; 
   fptype daug3Mass  = functorConstants[indices[1] + 3];  
 
+#ifdef THREEDINT
+  // Add time dependence before integrating over time
+  fptype* p = cudaArray;
+  fptype tau     = p[indices[2]];
+  fptype xmixing = p[indices[3]];
+  fptype ymixing = p[indices[4]];
+  fptype gammahalf = decaytime/(2*tau);
+
+  devcomplex<fptype> e1( EXP(-gammahalf*(1+ymixing))*COS(gammahalf*xmixing) , -EXP(-gammahalf*(1+ymixing))*SIN(gammahalf*xmixing) );
+  devcomplex<fptype> e2( EXP(-gammahalf*(1-ymixing))*COS(gammahalf*xmixing) , +EXP(-gammahalf*(1-ymixing))*SIN(gammahalf*xmixing) );
+  devcomplex<fptype> sqrt2(1/SQRT(2.), 0);
+  // Time-dependent amplitudes
+  devcomplex<fptype> eA = sqrt2*(e1 + e2);
+  devcomplex<fptype> eB = sqrt2*(e1 - e2);
+#else
+  devcomplex<fptype> eA(1,0);
+  devcomplex<fptype> eB(1,0);
+#endif
+
   if (!inDalitz(m12, m13, motherMass, daug1Mass, daug2Mass, daug3Mass)) return ret;
   fptype m23 = motherMass*motherMass + daug1Mass*daug1Mass + daug2Mass*daug2Mass + daug3Mass*daug3Mass - m12 - m13; 
 
@@ -724,8 +859,8 @@ EXEC_TARGET WaveHolder SpecialWaveCalculator::operator () (thrust::tuple<int, fp
   unsigned int functn_i = indices[parameter_i+2];
   unsigned int params_i = indices[parameter_i+3];
 
-  devcomplex<fptype> ai = getResonanceAmplitude(m12, m13, m23, functn_i, params_i);
-  devcomplex<fptype> bi = getResonanceAmplitude(m13, m12, m23, functn_i, params_i);
+  devcomplex<fptype> ai = eA*getResonanceAmplitude(m12, m13, m23, functn_i, params_i);
+  devcomplex<fptype> bi = eB*getResonanceAmplitude(m13, m12, m23, functn_i, params_i);
 
   //printf("Amplitudes %f, %f => (%f %f) (%f %f)\n", m12, m13, ai.real, ai.imag, bi.real, bi.imag);
 
@@ -735,5 +870,23 @@ EXEC_TARGET WaveHolder SpecialWaveCalculator::operator () (thrust::tuple<int, fp
   thrust::get<3>(ret) = bi.imag; 
 
   return ret; 
+}
+__host__ void TddpPdf::storeValue (int index) const{
+  assert(index > 1 && index < 5);
+  if (!cachedVar) cachedVar = new fptype[3];
+  // host_params[host_indices[parameters + index]]; where index = 2,3,4 for tau, x, y
+
+  cachedVar[index-2] = host_params[host_indices[parameters + index]];
+}
+
+__host__ bool TddpPdf::valueChanged (int index) const{
+  assert(index > 1 && index < 5);
+  if (!cachedVar) return true;
+
+  if (cachedVar[index-2] != host_params[host_indices[parameters + index]]){
+    return true;
+  }
+
+  return false;
 }
 

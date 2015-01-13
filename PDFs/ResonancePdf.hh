@@ -2,7 +2,9 @@
 #define RESONANCE_PDF_HH
 
 #include "GooPdf.hh" 
-#include "devcomplex.hh" 
+#include "devcomplex.hh"
+enum DecayChannels {pipi = 0, KK =1, four_pi =2, hh =3, hhprime =4};
+ 
 typedef devcomplex<fptype> (*resonance_function_ptr) (fptype, fptype, fptype, unsigned int*); 
 
 class ResonancePdf : public GooPdf {
@@ -17,6 +19,16 @@ class ResonancePdf : public GooPdf {
   friend class DalitzPlotPdf; 
   friend class IncoherentSumPdf; 
 public:
+  // Constructor for the K Matrix formalism
+  ResonancePdf (string name,
+                            Variable* ar,             
+                            Variable* ai,             
+                            Variable* Spr0,
+                            unsigned int term,
+                            unsigned int sp,         
+                            unsigned int cyc);
+
+
   // Constructor for regular BW 
   ResonancePdf (string name, 
 			  Variable* ar, 
@@ -34,8 +46,7 @@ public:
 			  Variable* mass, 
 			  Variable* width, 
 			  unsigned int cyc); 
- 
-  // LASS constructor
+  // LASS 
   ResonancePdf (string name,
                           Variable* ar,
                           Variable* ai,
@@ -43,7 +54,6 @@ public:
 			  unsigned int sp,
                           Variable* width,
                           unsigned int cyc);
-  
 
   // Nonresonant constructor
   ResonancePdf (string name, 
@@ -63,14 +73,14 @@ private:
 
   Variable* amp_real;
   Variable* amp_imag;
-  /*
+/*
   Variable* mass;
   Variable* width;
   unsigned int spin;
   unsigned int cyclic_index;
   unsigned int eval_type;
   unsigned int resonance_type; 
-  */ 
+*/
 };
 
 #endif

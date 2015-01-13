@@ -4,12 +4,17 @@ EXEC_TARGET fptype device_truth_resolution (fptype coshterm, fptype costerm, fpt
 					   fptype tau, fptype dtime, fptype xmixing, fptype ymixing, fptype /*sigma*/, 
 					   fptype* /*p*/, unsigned int* /*indices*/) { 
   fptype ret = 0;
+
+#ifdef THREEDINT
+  ret = coshterm + costerm + sinhterm + sinterm;
+#else
   dtime /= tau; 
   ret += coshterm*COSH(ymixing * dtime);
   ret += costerm*COS (xmixing * dtime);
   ret -= 2*sinhterm * SINH(ymixing * dtime);
   ret -= 2*sinterm * SIN (xmixing * dtime); // Notice sign difference wrt to Mikhail's code, because I have AB* and he has A*B. 
   ret *= EXP(-dtime); 
+#endif
 
   //cuPrintf("device_truth_resolution %f %f %f %f %f\n", coshterm, costerm, sinhterm, sinterm, dtime); 
   return ret; 
@@ -31,10 +36,10 @@ fptype TruthResolution::normalisation (fptype di1, fptype di2, fptype di3, fptyp
   fptype timeIntegralThr = ymixing * timeIntegralOne;
   fptype timeIntegralFou = xmixing * timeIntegralTwo;
        
-  fptype ret = timeIntegralOne * (di1 + di2);
-  ret       += timeIntegralTwo * (di1 - di2);
-  ret       -= 2*timeIntegralThr * di3;
-  ret       -= 2*timeIntegralFou * di4;
+  fptype ret = timeIntegralOne * (di1 + di2); // In thesis notation: ~ |A_2|^2 + |A_1|^2, in GooFit notation: ~ |A^2| + |B^2|
+  ret       += timeIntegralTwo * (di1 - di2); // In thesis notation: ~ Re(A_1 A_2^*), in GooFit notation: ~ |A^2| - |B^2|
+  ret       -= 2*timeIntegralThr * di3;       // In thesis notation: ~ |A_2|^2 - |A_1|^2, in GooFit notation: ~ Re(AB^*)
+  ret       -= 2*timeIntegralFou * di4;       // In thesis notation: ~ Im(A_1 A_2^*), in GooFit notation: ~ Im(AB^*)
 
   return ret; 
 }

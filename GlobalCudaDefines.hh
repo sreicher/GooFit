@@ -25,6 +25,7 @@ extern int host_callnumber;
 #define MEM_SHARED
 #define MEM_CONSTANT 
 #define EXEC_TARGET __host__
+#define EXEC_TARGET_DEV __host__
 #define THREAD_SYNCH _Pragma("omp barrier") // valid in C99 and C++11, but probably not C++93
 #define DEVICE_VECTOR thrust::host_vector
 // Use char* here because I need +1 to mean "offset by one byte", not "by one sizeof(whatever)".
@@ -48,6 +49,7 @@ enum gooError {gooSuccess = 0, gooErrorMemoryAllocation};
 #define MEM_SHARED __shared__
 #define MEM_CONSTANT __constant__ 
 #define EXEC_TARGET __device__
+#define EXEC_TARGET_DEV __device__ __host__
 #define SYNCH cudaDeviceSynchronize 
 #define THREAD_SYNCH __syncthreads(); 
 #define DEVICE_VECTOR thrust::device_vector
@@ -79,6 +81,7 @@ typedef double fptype;
 // Double math functions
 #define ATAN2 atan2
 #define COS cos
+#define ACOS acos
 #define COSH cosh
 #define SINH sinh 
 #define ERF erf
@@ -102,6 +105,7 @@ typedef float fptype;
 // Float math functions
 #define ATAN2 atan2f
 #define COS cosf
+#define ACOS acosf
 #define COSH coshf
 #define SINH sinhf 
 #define ERF erff

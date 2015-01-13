@@ -47,13 +47,17 @@ public:
   __host__ virtual fptype normalise () const;
   __host__ void setDataSize (unsigned int dataSize, unsigned int evtSize = 5); 
   __host__ void setForceIntegrals (bool f = true) {forceRedoIntegrals = f;}  
+  __host__ virtual void storeValue (int index) const;
+  __host__ virtual bool  valueChanged(int index) const;
 
 protected:
+  mutable fptype* cachedVar;
 
 private:
   DecayInfo* decayInfo; 
   Variable* _m12;
   Variable* _m13; 
+  Variable* _savedtime;
   fptype* dalitzNormRange; 
 
   // Following variables are useful if masses and widths, involved in difficult BW calculation, 

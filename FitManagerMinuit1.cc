@@ -2,6 +2,8 @@ PdfBase* pdfPointer;
 FitManager* currGlue = 0; 
 int numPars = 0; 
 vector<Variable*> vars; 
+double avtimeperit(0.);
+int ncalls(0);
 
 void specialTddpPrint (double fun); 
 
@@ -52,8 +54,10 @@ void FitManager::runMigrad () {
     plist[0] = overrideCallLimit;
     int err = 0; 
     minuit->mnexcm("MIGRAD", plist, 1, err);
+    cout << " Average time per iteration: " << avtimeperit/ncalls  << " for ncalls " << ncalls << endl;
   }
   else minuit->Migrad(); 
+  
 }
 
 void FitManager::getMinuitValues () const {
@@ -65,6 +69,11 @@ void FitManager::getMinuitValues () const {
 
 void FitFun(int &npar, double *gin, double &fun, double *fp, int iflag) {
   vector<double> pars;
+  clock_t startCPU, stopCPU;
+  tms startProc, stopProc;
+  double elapsedTime = 0.;
+  startCPU = times(&startProc);
+
   // Notice that npar is number of variable parameters, not total. 
   pars.resize(numPars); 
   int counter = 0; 
@@ -76,6 +85,12 @@ void FitFun(int &npar, double *gin, double &fun, double *fp, int iflag) {
   pdfPointer->copyParams(pars); 
   fun = pdfPointer->calculateNLL(); 
   host_callnumber++; 
+
+  stopCPU = times(&stopProc);
+  elapsedTime = ((double) stopCPU - (double)startCPU)/CLOCKS_PER_SEC;
+  //cout << "Elapsed time " << elapsedTime << " for call " << ncalls << endl;
+  avtimeperit += elapsedTime;
+  ncalls++;
 
 #ifdef PRINTCALLS
   specialTddpPrint(fun); 
