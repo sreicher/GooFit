@@ -2,7 +2,8 @@
 .project
 examples/simpleFit/simpleFitExample
 examples/dalitz/dalitz
-examples/dalitz/dalitz/DalitzFit.cu
+examples/dalitz/DalitzFit.cu
+examples/dalitz/lazy.sh
 examples/exponential/exponential 
 examples/product/product
 wrkdir/
