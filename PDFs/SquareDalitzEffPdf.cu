@@ -23,7 +23,9 @@ EXEC_TARGET fptype mprime (fptype m12, fptype m13, fptype mD, fptype mKS0, fptyp
   fptype rootPi = -2.*ATAN2(-1.0,0.0); // Pi
 
   if (m23 < 0) return -99;
-  return ((2.0*(SQRT(m23) - (mh1 + mh2))/(mD - mKS0 - (mh1 + mh2))) - 1.0);
+  fptype tmp = ((2.0*(SQRT(m23) - (mh1 + mh2))/(mD - mKS0 - (mh1 + mh2))) - 1.0);
+  if (isnan(tmp)) tmp = -99;
+  return tmp;
 }
 
 EXEC_TARGET fptype thetaprime (fptype m12, fptype m13, fptype mD, fptype mKS0, fptype mh1, fptype mh2) {
@@ -34,6 +36,7 @@ EXEC_TARGET fptype thetaprime (fptype m12, fptype m13, fptype mD, fptype mKS0, f
   fptype num = m23*( m12 - m13) + (mh2*mh2 - mh1*mh1)*(mD*mD - mKS0*mKS0);
   fptype denum = SQRT(((m23 - mh1*mh1 + mh2*mh2)*(m23 - mh1*mh1 + mh2*mh2) - 4*m23*mh2*mh2))*SQRT(((mD*mD - mKS0*mKS0 - m23)*(mD*mD - mKS0*mKS0 -m23) - 4*m23*mKS0*mKS0));
   fptype theta = -99 ;
+  if (isnan(denum)) return -99;
 
   if (denum != 0.){
     theta = num/denum;
@@ -63,23 +66,28 @@ EXEC_TARGET fptype device_SquareDalitzEff (fptype* evt, fptype* p, unsigned int*
   fptype c2 = p[indices[7]];   
   fptype c3 = p[indices[8]];   
   fptype c4 = p[indices[9]];   
+  fptype c5 = p[indices[10]];   
   // Check phase space
   if (inPS == 0) return 0;
   
   // Call helper functions
-  fptype mp     = mprime(x,y,mD,mKS0,mh1,mh2); 
   fptype thetap = thetaprime(x,y,mD,mKS0,mh1,mh2); 
-
-  if (mp > 1. || mp < -1.) return 0;
   if (thetap > 1. || thetap < -1.) return 0; 
 
-  fptype rootPi = -2.*ATAN2(-1.0,0.0); // Pi
-  // Calculate acutual m'^2 and theta'
-  mp     = POW(ACOS( mp )/rootPi,2);
-  thetap = ACOS( thetap )/rootPi;
+  fptype m23 = mD*mD + mKS0*mKS0 + mh1*mh1 + mh2*mh2 - x - y; 
+  if (m23 < 0) return 0;
 
-  fptype tmp = c2 + c3*mp + c4*POW(mp,2);
-  fptype ret = c0*POW(thetap,2) + c1*mp*POW(thetap,2) + tmp;
+  fptype ret = c0*m23*m23 + c1*m23 + c2*m23*thetap*thetap + c3*thetap*thetap + c4*thetap + c5; 
+
+  //fptype mp     = mprime(x,y,mD,mKS0,mh1,mh2); 
+  //if (mp > 1. || mp < -1.) return 0;
+  //fptype rootPi = -2.*ATAN2(-1.0,0.0); // Pi
+  // Calculate acutual m'^2 and theta'
+  //mp     = POW(ACOS( mp )/rootPi,2);
+  //thetap = ACOS( thetap )/rootPi;
+
+  //fptype tmp = c2 + c3*mp + c4*POW(mp,2);
+  //fptype ret = c0*POW(thetap,2) + c1*mp*POW(thetap,2) + tmp;
   //printf("Efficiency %f and m12 %f and m13 %f and dtime %f\n", ret, x, y, z);
   //printf("Efficiency %f and mp %f and thetap %f and dtime %f\n", ret, mp, thetap, z);
   
